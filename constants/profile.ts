@@ -6,7 +6,7 @@ export const PROFILE = {
   links: {
     github: "https://github.com/cnnadozi",
     linkedin: "https://www.linkedin.com/in/chikaosolu-nnadozie-798424279/",
-    cv: "https://drive.google.com/file/d/15wH7Mt38RFFTiLRMW9CyvpEasBFhtHRw/view?usp=sharing",
+    cv: "https://drive.google.com/file/d/1VBZ-VSofJadmzE-WHPr3nxMula6k5nc-/view?usp=sharing",
     email: "mailto:chikaosro@gmail.com",
   },
 } as const;
