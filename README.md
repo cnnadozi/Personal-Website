@@ -1,1 +1,1 @@
-link: https://nnadozi.dev/
+link: https://chikaosolu.dev/
