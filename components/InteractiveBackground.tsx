@@ -17,57 +17,92 @@ export function InteractiveBackground({ theme }: { theme: Theme }) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    type Particle = {
+    // A dot sits in a fixed grid. `homeX/homeY` is where it rests; `x/y` is
+    // its live position; `vx/vy` is its velocity. The cursor pushes it away
+    // and a spring pulls it home, producing a damped ripple. `glow` (0..1)
+    // tracks cursor proximity for brightening and accent tint.
+    type Dot = {
+      homeX: number;
+      homeY: number;
       x: number;
       y: number;
       vx: number;
       vy: number;
-      size: number;
-      alpha: number;
+      glow: number;
     };
 
-    const initialTrailX = window.innerWidth / 2;
-    const initialTrailY = Math.max(80, window.innerHeight / 2 - 190);
-    const trailLength = 24;
-    const trail: Particle[] = Array.from({ length: trailLength }, () => ({
-      x: initialTrailX,
-      y: initialTrailY,
-      vx: 0,
-      vy: 0,
-      size: 0,
-      alpha: 0,
-    }));
-    const ambientCount = 70;
-    const ambient: Particle[] = [];
+    // Physics + layout tuning.
+    const spacing = 34; // distance between grid dots (px)
+    const baseRadius = 1.6; // resting dot radius (px)
+    const influence = 150; // cursor effect radius (px)
+    const pushStrength = 1.5; // how hard the cursor shoves dots
+    const spring = 0.045; // pull back toward home (higher = snappier)
+    const damping = 0.86; // velocity decay (lower = more friction)
+    const waveAmp = 6; // amplitude of the traveling ambient wave (px)
+    const lineMaxDist = spacing * 2.1; // hide mesh lines once stretched too far
+    const meshOpacity = 0.38; // global opacity of dots + lines (lower = subtler)
 
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      if (ambient.length === 0) {
-        for (let i = 0; i < ambientCount; i += 1) {
-          ambient.push({
-            x: Math.random() * canvas.width,
-            y: Math.random() * canvas.height,
-            vx: (Math.random() - 0.5) * 0.28,
-            vy: (Math.random() - 0.5) * 0.28,
-            size: 1.2 + Math.random() * 2.6,
-            alpha: 0.18 + Math.random() * 0.28,
-          });
+    let dots: Dot[] = [];
+    let cols = 0;
+    let rows = 0;
+
+    const buildGrid = (w: number, h: number) => {
+      dots = [];
+      // Inset by half a cell and center the grid so edges look balanced.
+      cols = Math.floor(w / spacing);
+      rows = Math.floor(h / spacing);
+      const offsetX = (w - (cols - 1) * spacing) / 2;
+      const offsetY = (h - (rows - 1) * spacing) / 2;
+      for (let r = 0; r < rows; r += 1) {
+        for (let c = 0; c < cols; c += 1) {
+          const x = offsetX + c * spacing;
+          const y = offsetY + r * spacing;
+          dots.push({ homeX: x, homeY: y, x, y, vx: 0, vy: 0, glow: 0 });
         }
       }
     };
 
+    const resizeCanvas = () => {
+      const dpr = window.devicePixelRatio || 1;
+      // Size to the canvas's own layout box (the window content area), not the
+      // whole viewport, so the mesh fills the macOS window precisely.
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      if (w === 0 || h === 0) return;
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      // Work in CSS pixels; scale the backing store for crisp rendering.
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      buildGrid(w, h);
+    };
+
     resizeCanvas();
     window.addEventListener("resize", resizeCanvas);
+    // Track size changes of the content area (e.g. window maximize toggle).
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(resizeCanvas) : null;
+    resizeObserver?.observe(canvas);
 
-    const pointer = { x: initialTrailX, y: initialTrailY };
-    let pointerHasMoved = false;
+    // Start the pointer off-screen so the grid is undisturbed until the user moves.
+    const pointer = { x: -9999, y: -9999 };
     const handlePointerMove = (event: PointerEvent) => {
-      pointer.x = event.clientX;
-      pointer.y = event.clientY;
-      pointerHasMoved = true;
+      // Convert viewport coordinates into canvas-local space so distortion
+      // tracks the cursor correctly even though the canvas is inset in the window.
+      const rect = canvas.getBoundingClientRect();
+      pointer.x = event.clientX - rect.left;
+      pointer.y = event.clientY - rect.top;
     };
-    window.addEventListener("pointermove", handlePointerMove);
+    const handlePointerLeave = () => {
+      pointer.x = -9999;
+      pointer.y = -9999;
+    };
+    // Capture phase fires top-down before child elements (text, icons, image,
+    // buttons) can swallow the event, so the distortion keeps tracking the
+    // cursor even when it's over the card content.
+    window.addEventListener("pointermove", handlePointerMove, { capture: true });
+    // Only reset when the pointer actually leaves the window, not when it
+    // crosses onto a child element inside it.
+    document.addEventListener("pointerleave", handlePointerLeave);
 
     let lastFrame = performance.now();
 
@@ -77,65 +112,124 @@ export function InteractiveBackground({ theme }: { theme: Theme }) {
       if (!canvas || !ctx) return;
 
       const now = performance.now();
+      // Normalize to ~60fps steps and clamp so tab-switches don't explode physics.
       const dt = Math.min((now - lastFrame) / 16.67, 2);
       lastFrame = now;
 
-      const w = canvas.width;
-      const h = canvas.height;
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
       const t = now * 0.001;
       const background = theme === "light" ? "#F5F5F5" : "#171717";
-      const ambientColor = theme === "light" ? "40,40,40" : "225,225,225";
-      const snakeColor = theme === "light" ? "20,20,20" : "235,235,235";
+      // Monochrome gray; dots/lines brighten (not tint) near the cursor.
+      const base = theme === "light" ? [55, 65, 81] : [220, 220, 220];
 
       ctx.fillStyle = background;
       ctx.fillRect(0, 0, w, h);
 
-      // Keep subtle background particles alive to make the scene feel active.
-      for (let i = 0; i < ambient.length; i += 1) {
-        const dot = ambient[i];
+      const influenceSq = influence * influence;
+
+      // Disturbance emitters that push the grid like the cursor does. Two of
+      // them roam autonomously on Lissajous paths so the field is always in
+      // motion; the real pointer (when on screen) is just another emitter.
+      const emitters: { x: number; y: number; strength: number }[] = [
+        {
+          x: w * (0.5 + 0.34 * Math.sin(t * 0.27)),
+          y: h * (0.5 + 0.32 * Math.sin(t * 0.21 + 1.3)),
+          strength: 0.8,
+        },
+        {
+          x: w * (0.5 + 0.4 * Math.cos(t * 0.19 + 2.1)),
+          y: h * (0.5 + 0.28 * Math.cos(t * 0.31)),
+          strength: 0.6,
+        },
+      ];
+      if (pointer.x > -9000) {
+        emitters.push({ x: pointer.x, y: pointer.y, strength: 1 });
+      }
+
+      // --- Physics pass: update every dot's position and glow. ---
+      for (let i = 0; i < dots.length; i += 1) {
+        const dot = dots[i];
+
+        // Sum repulsion from every emitter; track the strongest proximity for glow.
+        let targetGlow = 0;
+        for (let e = 0; e < emitters.length; e += 1) {
+          const emitter = emitters[e];
+          const dx = dot.x - emitter.x;
+          const dy = dot.y - emitter.y;
+          const distSq = dx * dx + dy * dy;
+          if (distSq < influenceSq && distSq > 0.01) {
+            const dist = Math.sqrt(distSq);
+            const falloff = (influence - dist) / influence; // 1 at center -> 0 at edge
+            const force = falloff * falloff * pushStrength * emitter.strength;
+            dot.vx += (dx / dist) * force * dt;
+            dot.vy += (dy / dist) * force * dt;
+            targetGlow = Math.max(targetGlow, falloff * emitter.strength);
+          }
+        }
+        // Ease glow toward its target so brightening/fading feels smooth.
+        dot.glow += (targetGlow - dot.glow) * Math.min(0.15 * dt, 1);
+
+        // Traveling wave: the rest position rolls on a sine wave whose phase
+        // depends on location, so a visible ripple sweeps across the grid.
+        const restX = dot.homeX + Math.sin(t * 0.9 + dot.homeX * 0.018 + dot.homeY * 0.01) * waveAmp;
+        const restY = dot.homeY + Math.cos(t * 0.8 + dot.homeY * 0.018) * waveAmp;
+
+        // Spring back toward the (drifting) rest point, then damp the velocity.
+        dot.vx += (restX - dot.x) * spring * dt;
+        dot.vy += (restY - dot.y) * spring * dt;
+        dot.vx *= damping;
+        dot.vy *= damping;
         dot.x += dot.vx * dt;
         dot.y += dot.vy * dt;
-        if (dot.x < -6) dot.x = w + 6;
-        if (dot.x > w + 6) dot.x = -6;
-        if (dot.y < -6) dot.y = h + 6;
-        if (dot.y > h + 6) dot.y = -6;
-
-        ctx.beginPath();
-        ctx.fillStyle = `rgba(${ambientColor},${dot.alpha})`;
-        ctx.arc(dot.x, dot.y, dot.size, 0, Math.PI * 2);
-        ctx.fill();
       }
 
-      // The "snake" head eases toward the pointer while the tail follows.
-      const head = trail[0];
-      const idleX = initialTrailX + Math.sin(t * 0.8) * w * 0.04;
-      const idleY = initialTrailY + Math.cos(t * 1.05) * h * 0.03;
-      const targetX = pointerHasMoved ? pointer.x : idleX;
-      const targetY = pointerHasMoved ? pointer.y : idleY;
+      // --- Mesh pass: connect each dot to its right/down neighbor. ---
+      // Lines fade in near the cursor and disappear when stretched too far,
+      // so the grid reads as a net that warps around the pointer.
+      for (let r = 0; r < rows; r += 1) {
+        for (let c = 0; c < cols; c += 1) {
+          const i = r * cols + c;
+          const dot = dots[i];
+          const neighbors = [];
+          if (c < cols - 1) neighbors.push(dots[i + 1]);
+          if (r < rows - 1) neighbors.push(dots[i + cols]);
 
-      head.vx += (targetX - head.x) * 0.04 * dt;
-      head.vy += (targetY - head.y) * 0.04 * dt;
-      head.vx *= 0.84;
-      head.vy *= 0.84;
-      head.x += head.vx * dt;
-      head.y += head.vy * dt;
+          for (let n = 0; n < neighbors.length; n += 1) {
+            const nb = neighbors[n];
+            const lx = nb.x - dot.x;
+            const ly = nb.y - dot.y;
+            const len = Math.sqrt(lx * lx + ly * ly);
+            if (len > lineMaxDist) continue;
 
-      for (let i = 1; i < trail.length; i += 1) {
-        const prev = trail[i - 1];
-        const segment = trail[i];
-        segment.x += (prev.x - segment.x) * (0.22 - i * 0.004) * dt;
-        segment.y += (prev.y - segment.y) * (0.22 - i * 0.004) * dt;
+            // Lines stay gray; they only brighten (not tint) near the cursor.
+            const glow = Math.max(dot.glow, nb.glow);
+            const alpha = (0.04 + glow * 0.32) * meshOpacity;
+
+            ctx.beginPath();
+            ctx.strokeStyle = `rgba(${base[0]},${base[1]},${base[2]},${alpha})`;
+            ctx.lineWidth = 1;
+            ctx.moveTo(dot.x, dot.y);
+            ctx.lineTo(nb.x, nb.y);
+            ctx.stroke();
+          }
+        }
       }
 
-      for (let i = trail.length - 1; i >= 0; i -= 1) {
-        const segment = trail[i];
-        const ratio = 1 - i / trail.length;
-        const size = 1 + ratio * 6;
-        const alpha = 0.03 + ratio * 0.28;
+      // --- Dot pass: draw nodes, brightened by displacement + cursor glow. ---
+      for (let i = 0; i < dots.length; i += 1) {
+        const dot = dots[i];
+        const offX = dot.x - dot.homeX;
+        const offY = dot.y - dot.homeY;
+        const displacement = Math.sqrt(offX * offX + offY * offY);
+        const energy = Math.max(Math.min(displacement / 40, 1), dot.glow);
+
+        const radius = baseRadius + energy * 2.4;
+        const alpha = (0.22 + energy * 0.6) * meshOpacity;
 
         ctx.beginPath();
-        ctx.fillStyle = `rgba(${snakeColor},${alpha})`;
-        ctx.arc(segment.x, segment.y, size, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${base[0]},${base[1]},${base[2]},${alpha})`;
+        ctx.arc(dot.x, dot.y, radius, 0, Math.PI * 2);
         ctx.fill();
       }
 
@@ -146,7 +240,9 @@ export function InteractiveBackground({ theme }: { theme: Theme }) {
 
     return () => {
       window.removeEventListener("resize", resizeCanvas);
-      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointermove", handlePointerMove, { capture: true });
+      document.removeEventListener("pointerleave", handlePointerLeave);
+      resizeObserver?.disconnect();
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
@@ -177,4 +273,3 @@ export function InteractiveBackground({ theme }: { theme: Theme }) {
     </View>
   );
 }
-

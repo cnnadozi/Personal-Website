@@ -1,7 +1,11 @@
 export const PROFILE = {
   fullName: "Chikaosolu Nnadozie",
-  about:
-    "Sophomore at Case Western Reserve University majoring in Computer Engineering. Exploring the intersection between software and hardware applications.",
+  // Name shown as the macOS app/window title (and desktop/Dock label).
+  appName: "Console",
+  // Big hero statement.
+  headline: "I like to tinker",
+  // Secondary headliner under the main text.
+  subtitle: "Computer Engineering @ CWRU",
   avatar: require("../assets/images/photo.webp"),
   links: {
     github: "https://github.com/cnnadozi",

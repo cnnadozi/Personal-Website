@@ -6,8 +6,8 @@ export const themeColors = {
     text: "#000000",
     cardBg: "transparent",
     cardBorder: "transparent",
-    iconBg: "#E5E5E5",
-    iconBorder: "#D1D5DB",
+    iconBg: "#EDEDED",
+    iconBorder: "#D4D4D4",
   },
   dark: {
     background: "#171717",

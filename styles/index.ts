@@ -15,27 +15,26 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 22,
     paddingVertical: 20,
   },
-  avatar: {
-    width: 140,
-    height: 140,
-    borderRadius: 70,
-    marginBottom: 16,
-    borderWidth: 2,
-  },
   name: {
-    fontSize: 34,
-    lineHeight: 40,
+    fontSize: 35,
     fontWeight: "800",
-    letterSpacing: -0.4,
     textAlign: "center",
   },
-  about: {
-    marginTop: 10,
+  subtitle: {
+    marginTop: 5,
     fontSize: 16,
-    lineHeight: 22,
+
     textAlign: "center",
+    opacity: 0.6,
+  },
+  headline: {
+    marginTop: 12,
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: "400",
+    textAlign: "left",
     maxWidth: 460,
-    opacity: 0.8,
+    opacity: 0.85,
   },
   linkRow: {
     marginTop: 18,

@@ -16,8 +16,8 @@ export default function RootLayout() {
         screenOptions={{
           headerShown: false,
           title: PROFILE.fullName,
-          // Keep a consistent background during transitions/loading.
-          contentStyle: { backgroundColor: "#171717" },
+          // White "desktop" behind the macOS-style app window.
+          contentStyle: { backgroundColor: "#FFFFFF" },
         }}
       />
       {Platform.OS === "web" && <Analytics />}

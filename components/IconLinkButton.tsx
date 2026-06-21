@@ -48,13 +48,12 @@ export function IconLinkButton({ icon, materialIcon, label, tooltip, href, theme
     }).start();
   };
 
-  const iconColor = themeColors[theme].text;
-
   const colors = themeColors[theme];
+  // Neutral dark gray in light mode (no blue/slate tint).
+  const iconColor = theme === "light" ? "#262626" : colors.text;
+
   const bgDefault = colors.iconBg;
-  const borderDefault = colors.iconBorder;
-  const bgHover = theme === "light" ? "#D1D5DB" : "#404040";
-  const borderHover = theme === "light" ? "#9CA3AF" : "#525252";
+  const bgHover = theme === "light" ? "#DCDCDC" : "#404040";
   const shadowColor = theme === "light" ? "rgba(0,0,0,0.12)" : "rgba(0,0,0,0.4)";
 
   return (
@@ -70,17 +69,15 @@ export function IconLinkButton({ icon, materialIcon, label, tooltip, href, theme
         styles.iconBtn,
         {
           backgroundColor: bgDefault,
-          borderColor: borderDefault,
           ...(Platform.OS === "web" && !hovered
             ? ({ boxShadow: `0 4px 12px ${theme === "light" ? "rgba(0,0,0,0.1)" : "rgba(0,0,0,0.35)"}` } as unknown as object)
             : {}),
         },
         hovered && {
           backgroundColor: bgHover,
-          borderColor: borderHover,
           ...(Platform.OS === "web"
             ? ({
-                boxShadow: `0 10px 30px ${shadowColor}, 0 0 0 1px ${borderHover}`,
+                boxShadow: `0 10px 30px ${shadowColor}`,
                 transform: "translateY(-4px) scale(1.08)",
               } as unknown as object)
             : {}),
@@ -128,15 +125,14 @@ export function IconLinkButton({ icon, materialIcon, label, tooltip, href, theme
 
 const styles = StyleSheet.create({
   iconBtn: {
-    width: 52,
-    height: 52,
+    width: 50,
+    height: 50,
     borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 2,
     ...(Platform.OS === "web"
       ? ({
-          transitionProperty: "transform, background-color, border-color, box-shadow",
+          transitionProperty: "transform, background-color, box-shadow",
           transitionDuration: "250ms",
           transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
           cursor: "pointer",
