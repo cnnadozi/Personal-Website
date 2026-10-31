@@ -1,16 +1,22 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { Animated, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import type { Theme } from "../constants/theme";
 import { AppIcon } from "./AppIcon";
-import { BootScreen } from "./BootScreen";
+import {
+  DESKTOP_ICON_SIZE,
+  DESKTOP_SHORTCUT_COUNT,
+  DESKTOP_SHORTCUT_HEIGHT,
+  DESKTOP_SHORTCUT_WIDTH,
+  DesktopLinks,
+  DesktopShortcut,
+  DesktopShortcutSlot,
+} from "./DesktopShortcut";
 import { ThemeToggle } from "./ThemeToggle";
 
 interface MacWindowProps {
   /** Text shown centered in the title bar, mimicking a macOS document title. */
   title: string;
-  /** Name used in the boot log's "launching session" line (defaults to title). */
-  bootLabel?: string;
   theme: Theme;
   onToggleTheme: () => void;
   children: ReactNode;
@@ -25,20 +31,30 @@ const TRAFFIC_LIGHTS = [
 
 type WindowState = "open" | "minimized" | "closed";
 
+const LIGHT_SIZE = 12;
+// Wider than the dot, so neighboring click areas touch with no dead gap between
+// them while the dots keep their 8px visual spacing.
+const LIGHT_HIT_WIDTH = 20;
+
+const DESKTOP_INSET = 28;
+const ICON_WINDOW_GAP = 8;
+const MIN_WINDOW_HEIGHT = 280;
+
 /**
  * Wraps the whole site in a macOS-style application window over a white
  * "desktop". The traffic lights are fully wired:
  *   - red   → closes the app (window flies out, a desktop shortcut appears)
  *   - yellow → minimizes (genie-shrinks into a Dock at the bottom)
  *   - green  → toggles a maximized size
- * Launching from the desktop icon replays the boot splash.
+ * The desktop starts empty; the first close, minimize or un-maximize reveals
+ * the desktop icons, which then stay for the rest of the visit.
  */
-export function MacWindow({ title, bootLabel, theme, onToggleTheme, children }: MacWindowProps) {
+export function MacWindow({ title, theme, onToggleTheme, children }: MacWindowProps) {
   const isDark = theme === "dark";
   const [windowState, setWindowState] = useState<WindowState>("open");
   const [maximized, setMaximized] = useState(false);
   const [lightsHovered, setLightsHovered] = useState(false);
-  const [booting, setBooting] = useState(true);
+  const [iconsRevealed, setIconsRevealed] = useState(false);
 
   // `anim`: overall presence (opacity + gentle scale) for open/close.
   // `minimizeAnim`: 0 = resting, 1 = shrunk + dropped toward the Dock (genie).
@@ -74,12 +90,47 @@ export function MacWindow({ title, bootLabel, theme, onToggleTheme, children }: 
     setSize(next);
   };
 
+  // Rests the window just under the desktop icons so they stay visible. Pass
+  // `animated` to glide along with the window's CSS size transition.
+  const placeBelowIcons = (animated: boolean) => {
+    if (Platform.OS !== "web") return;
+    const { innerWidth, innerHeight } = window;
+    // Mirror the icon row's wrapping to find where its last line ends.
+    const perRow = Math.max(1, Math.floor((innerWidth - DESKTOP_INSET * 2) / DESKTOP_SHORTCUT_WIDTH));
+    const rows = Math.ceil(DESKTOP_SHORTCUT_COUNT / perRow);
+    const iconsBottom = DESKTOP_INSET + rows * DESKTOP_SHORTCUT_HEIGHT + ICON_WINDOW_GAP;
+
+    const h = Math.max(
+      MIN_WINDOW_HEIGHT,
+      Math.min(Math.round(innerHeight * 0.8), innerHeight - iconsBottom - DESKTOP_INSET),
+    );
+    const next = { w: Math.round(innerWidth * 0.8), h };
+    sizeRef.current = next;
+    setSize(next);
+
+    // On very short screens the window wins and overlaps the icons, staying on-screen.
+    const top = Math.max(0, Math.min(iconsBottom, innerHeight - h));
+    // Offsets are measured from the window's centered resting spot.
+    const offset = { x: 0, y: top + h / 2 - innerHeight / 2 };
+    offsetRef.current = offset;
+    if (animated) {
+      Animated.timing(dragOffset, {
+        toValue: offset,
+        duration: 350,
+        easing: Easing.bezier(0.4, 0, 0.2, 1),
+        useNativeDriver: false,
+      }).start();
+    } else {
+      dragOffset.setValue(offset);
+    }
+  };
+
   // Establish the initial pixel size from 80% of the viewport (web only).
   useEffect(() => {
     resetSize();
   }, []);
 
-  // Bring the window in once on first mount; the boot splash plays inside it.
+  // Bring the window in once on first mount.
   useEffect(() => {
     Animated.spring(anim, { toValue: 1, tension: 60, friction: 11, useNativeDriver: false }).start();
   }, [anim]);
@@ -156,7 +207,7 @@ export function MacWindow({ title, bootLabel, theme, onToggleTheme, children }: 
     if (corners.length === 0) return;
 
     const minW = 360;
-    const minH = 280;
+    const minH = MIN_WINDOW_HEIGHT;
     let active = false;
     let dirX = 1;
     let dirY = 1;
@@ -230,6 +281,7 @@ export function MacWindow({ title, bootLabel, theme, onToggleTheme, children }: 
 
   const handleClose = () => {
     Animated.timing(anim, { toValue: 0, duration: 240, useNativeDriver: false }).start(() => {
+      setIconsRevealed(true);
       setWindowState("closed");
     });
   };
@@ -238,23 +290,37 @@ export function MacWindow({ title, bootLabel, theme, onToggleTheme, children }: 
     Animated.parallel([
       Animated.timing(anim, { toValue: 0, duration: 320, useNativeDriver: false }),
       Animated.timing(minimizeAnim, { toValue: 1, duration: 320, useNativeDriver: false }),
-    ]).start(() => setWindowState("minimized"));
+    ]).start(() => {
+      setIconsRevealed(true);
+      setWindowState("minimized");
+    });
   };
 
-  // Relaunch from the desktop shortcut: replay the boot splash, then reveal.
+  const handleZoom = () => {
+    if (maximized) {
+      setIconsRevealed(true);
+      placeBelowIcons(true);
+    } else {
+      // Zoom re-centers the window, like macOS.
+      resetPosition();
+    }
+    setMaximized(!maximized);
+  };
+
+  // Relaunch from the desktop shortcut. Closing unmounted the page, so its
+  // entrance and typing animations replay.
   const relaunch = () => {
     anim.setValue(0);
     minimizeAnim.setValue(0);
-    resetPosition();
-    resetSize();
+    placeBelowIcons(false);
     setMaximized(false);
-    setBooting(true);
     setWindowState("open");
     animateIn();
   };
 
-  // Restore from the Dock: genie back up, no boot replay (content stays mounted).
+  // Restore from the Dock: genie back up (content stays mounted).
   const restore = () => {
+    if (!maximized) placeBelowIcons(false);
     setWindowState("open");
     animateIn();
   };
@@ -288,6 +354,25 @@ export function MacWindow({ title, bootLabel, theme, onToggleTheme, children }: 
 
   return (
     <View style={styles.desktop}>
+      {/* Desktop icons. Rendered before the window so it sits on top of them. */}
+      {iconsRevealed && (
+        <View style={styles.desktopIcons}>
+          {windowState === "closed" ? (
+            <DesktopShortcut
+              label={title}
+              accessibilityLabel={`Open ${title}`}
+              accessibilityRole="button"
+              onPress={relaunch}
+            >
+              <AppIcon size={DESKTOP_ICON_SIZE} />
+            </DesktopShortcut>
+          ) : (
+            <DesktopShortcutSlot />
+          )}
+          <DesktopLinks />
+        </View>
+      )}
+
       {/* The app window (hidden while closed). */}
       {windowState !== "closed" && (
         <Animated.View
@@ -313,11 +398,7 @@ export function MacWindow({ title, bootLabel, theme, onToggleTheme, children }: 
             ref={titleBarRef}
             style={[styles.titleBar, { backgroundColor: titleBarBg, borderBottomColor: borderColor }]}
           >
-            <Pressable
-              onHoverIn={() => setLightsHovered(true)}
-              onHoverOut={() => setLightsHovered(false)}
-              style={styles.lights}
-            >
+            <View style={styles.lights}>
               {TRAFFIC_LIGHTS.map((light) => (
                 <Pressable
                   key={light.key}
@@ -326,22 +407,22 @@ export function MacWindow({ title, bootLabel, theme, onToggleTheme, children }: 
                   onPress={() => {
                     if (light.key === "close") handleClose();
                     else if (light.key === "minimize") handleMinimize();
-                    else {
-                      // Zoom re-centers the window, like macOS.
-                      resetPosition();
-                      setMaximized((m) => !m);
-                    }
+                    else handleZoom();
                   }}
-                  style={[styles.light, { backgroundColor: light.color, borderColor: light.border }]}
+                  onHoverIn={() => setLightsHovered(true)}
+                  onHoverOut={() => setLightsHovered(false)}
+                  style={styles.lightHitArea}
                 >
-                  {lightsHovered && (
-                    <Text style={styles.lightGlyph} selectable={false}>
-                      {light.glyph}
-                    </Text>
-                  )}
+                  <View style={[styles.light, { backgroundColor: light.color, borderColor: light.border }]}>
+                    {lightsHovered && (
+                      <Text style={styles.lightGlyph} selectable={false}>
+                        {light.glyph}
+                      </Text>
+                    )}
+                  </View>
                 </Pressable>
               ))}
-            </Pressable>
+            </View>
 
             <View pointerEvents="none" style={styles.titleBarSpacer} />
 
@@ -354,10 +435,8 @@ export function MacWindow({ title, bootLabel, theme, onToggleTheme, children }: 
             </Text>
           </View>
 
-          {/* Content area: boot splash first, then the page. */}
-          <View style={[styles.content, { backgroundColor: contentBg }]}>
-            {booting ? <BootScreen label={bootLabel ?? title} onFinish={() => setBooting(false)} /> : children}
-          </View>
+          {/* Content area */}
+          <View style={[styles.content, { backgroundColor: contentBg }]}>{children}</View>
 
           {/* Corner resize handles (web, only when not full screen). Top corners
               are kept small so they never cover the traffic lights / theme toggle. */}
@@ -377,21 +456,6 @@ export function MacWindow({ title, bootLabel, theme, onToggleTheme, children }: 
             </>
           )}
         </Animated.View>
-      )}
-
-      {/* Desktop shortcut (visible when the app is closed). */}
-      {windowState === "closed" && (
-        <Pressable
-          onPress={relaunch}
-          accessibilityRole="button"
-          accessibilityLabel={`Open ${title}`}
-          style={({ hovered }) => [styles.shortcut, hovered && styles.shortcutHovered]}
-        >
-          <AppIcon size={58} />
-          <Text style={styles.shortcutLabel} numberOfLines={2} selectable={false}>
-            {title}
-          </Text>
-        </Pressable>
       )}
 
       {/* Dock (visible when minimized). */}
@@ -444,18 +508,25 @@ const styles = StyleSheet.create({
   },
   lights: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
+    // Fills the title bar's height, and the negative margin keeps the first dot
+    // lined up with the title bar's padding despite its wider click area.
+    alignSelf: "stretch",
+    marginLeft: -(LIGHT_HIT_WIDTH - LIGHT_SIZE) / 2,
     zIndex: 3,
   },
-  light: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    borderWidth: 0.5,
+  lightHitArea: {
+    width: LIGHT_HIT_WIDTH,
     alignItems: "center",
     justifyContent: "center",
     ...(Platform.OS === "web" ? ({ cursor: "pointer" } as unknown as object) : null),
+  },
+  light: {
+    width: LIGHT_SIZE,
+    height: LIGHT_SIZE,
+    borderRadius: LIGHT_SIZE / 2,
+    borderWidth: 0.5,
+    alignItems: "center",
+    justifyContent: "center",
   },
   lightGlyph: {
     fontSize: 9,
@@ -522,28 +593,14 @@ const styles = StyleSheet.create({
     borderRightWidth: 2,
     borderBottomWidth: 2,
   },
-  shortcut: {
+  desktopIcons: {
     position: "absolute",
-    top: 28,
-    left: 28,
-    width: 92,
-    alignItems: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 6,
-    borderRadius: 12,
-    gap: 8,
-    ...(Platform.OS === "web"
-      ? ({ cursor: "pointer", transitionProperty: "background-color", transitionDuration: "150ms" } as unknown as object)
-      : null),
-  },
-  shortcutHovered: {
-    backgroundColor: "rgba(0,0,0,0.06)",
-  },
-  shortcutLabel: {
-    color: "rgba(0,0,0,0.72)",
-    fontSize: 12,
-    fontWeight: "600",
-    textAlign: "center",
+    top: DESKTOP_INSET,
+    left: DESKTOP_INSET,
+    right: DESKTOP_INSET,
+    // A row that wraps to a new line on narrow screens.
+    flexDirection: "row",
+    flexWrap: "wrap",
   },
   dock: {
     position: "absolute",

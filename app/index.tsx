@@ -10,7 +10,6 @@ export default function Index() {
   return (
     <MacWindow
       title={PROFILE.appName}
-      bootLabel={PROFILE.fullName}
       theme={theme}
       onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
     >

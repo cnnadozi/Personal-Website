@@ -9,16 +9,16 @@ import { InteractiveBackground } from "./InteractiveBackground";
 
 /**
  * The actual page content (interactive background + name/links card). It is
- * mounted by MacWindow only once the boot splash finishes, so its entrance and
- * typewriter animations begin exactly when the app "opens".
+ * mounted whenever the MacWindow opens, so its entrance and typewriter
+ * animations begin exactly when the app "opens".
  */
 export function HeroScreen({ theme }: { theme: Theme }) {
-  const typingSpeedMs = 55;
+  const typingSpeedMs = 40;
   // Start the subtitle right after the name finishes typing.
   const subtitleStartDelayMs = PROFILE.fullName.length * typingSpeedMs + 350;
   const { contentAnim, buttonsAnimStyle } = useAnimations();
 
-  // Type the name first, then the subtitle, once the app has booted.
+  // Type the name first, then the subtitle.
   const typedName = useTypewriter(PROFILE.fullName, {
     speedMs: typingSpeedMs,
     startDelayMs: 0,

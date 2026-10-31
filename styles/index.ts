@@ -16,16 +16,16 @@ export const styles = StyleSheet.create({
     paddingVertical: 20,
   },
   name: {
-    fontSize: 35,
+    fontSize: 38,
     fontWeight: "800",
     textAlign: "center",
   },
   subtitle: {
     marginTop: 5,
-    fontSize: 16,
-
+    fontSize: 17,
+    fontWeight: "500",
     textAlign: "center",
-    opacity: 0.6,
+    opacity: 0.8,
   },
   headline: {
     marginTop: 12,

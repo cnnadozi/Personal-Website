@@ -5,7 +5,7 @@ export const PROFILE = {
   // Big hero statement.
   headline: "I like to tinker",
   // Secondary headliner under the main text.
-  subtitle: "Computer Engineering @ CWRU",
+  subtitle: "Computer Engineering @ CWRU | Prev @ Amazon, MathWorks",
   avatar: require("../assets/images/photo.webp"),
   links: {
     github: "https://github.com/cnnadozi",
